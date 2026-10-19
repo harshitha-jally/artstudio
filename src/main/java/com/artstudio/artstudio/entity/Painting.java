@@ -2,8 +2,10 @@ package com.artstudio.artstudio.entity;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import org.hibernate.annotations.DynamicUpdate;
 
 @Entity
+@DynamicUpdate
 @Table(name = "paintings")
 public class Painting {
 
