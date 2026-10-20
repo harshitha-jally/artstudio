@@ -27,6 +27,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, String>> handleBadJson(HttpMessageNotReadableException ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", "Request body is missing or not valid JSON"));
+        return ResponseEntity.badRequest().body(Map.of("message", "Invalid request. Check the date format (YYYY-MM-DD) and that numbers are numbers"));
     }
 }
