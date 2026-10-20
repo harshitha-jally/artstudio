@@ -77,3 +77,5 @@ form input, form textarea, form select {
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; background: #fff; }
 th, td { padding: 8px 10px; border-bottom: 1px solid #e5e5e5; text-align: left; vertical-align: top; }
+.booking-form { max-width: 520px; margin-bottom: 20px; }
+.price-preview { font-weight: 600; margin: 8px 0 12px; }

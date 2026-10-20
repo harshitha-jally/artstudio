@@ -4,8 +4,8 @@ const userBoxEl = document.getElementById('user-box');
 
 // Which tabs each role sees. We will add more tabs here later.
 const NAV = {
-    customer: [['paintings', 'Paintings'], ['orders', 'My orders']],
-    studio: [['paintings', 'Paintings'], ['orders', 'All orders']]
+    customer: [['paintings', 'Paintings'], ['orders', 'My orders'], ['bookings', 'Wall bookings']],
+    studio: [['paintings', 'Paintings'], ['orders', 'All orders'], ['bookings', 'Wall bookings']]
 };
 
 // Which function draws which page. We will add more pages here later.
@@ -13,7 +13,8 @@ const views = {
     login: renderLogin,
     signup: renderSignup,
     paintings: renderPaintings,
-    orders: renderOrders
+    orders: renderOrders,
+    bookings: renderBookings
 };
 
 // ---------- Routing: decide what to show based on the #/... part of the URL ----------
@@ -307,6 +308,148 @@ function renderOrders(root) {
             showBanner(err.message);
         }
         reload();
+    }
+
+    reload();
+}
+
+// ---------- Wall bookings ----------
+// Only used for the price preview. The server calculates the real price.
+const MURAL_RATE_PREVIEW = 150;
+
+function renderBookings(root) {
+    const isStudio = getSession().user.role === 'studio';
+
+    root.innerHTML = `
+        <div class="page-head"><h2>${isStudio ? 'Wall booking requests' : 'Wall bookings'}</h2></div>
+        ${isStudio ? '' : `
+        <section class="card booking-form">
+            <h3>Book a wall painting</h3>
+            <form id="booking-form">
+                <label>Date (7 to 90 days from today)
+                    <input type="date" name="date" required min="${dateInDays(7)}" max="${dateInDays(90)}"></label>
+                <label>Wall size in sq ft (10 to 500)
+                    <input type="number" name="wallSize" required min="10" max="500" step="1"></label>
+                <label>Address
+                    <textarea name="address" required maxlength="300"></textarea></label>
+                <p class="price-preview" id="price-preview"></p>
+                <button type="submit">Request booking</button>
+            </form>
+        </section>`}
+        <div id="booking-list"></div>`;
+
+    const listEl = root.querySelector('#booking-list');
+    const form = root.querySelector('#booking-form');
+    const previewEl = root.querySelector('#price-preview');
+
+    function reload() {
+        const emptyText = isStudio
+            ? 'No booking requests yet.'
+            : 'You have no wall bookings yet. Use the form above to request one.';
+        return loadInto(listEl, () => api('GET', '/api/bookings'), showTable, emptyText);
+    }
+
+    function showTable(bookings) {
+        listEl.innerHTML = `
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            ${isStudio ? '<th>Customer</th>' : ''}
+                            <th>Wall size</th><th>Address</th><th>Price</th><th>Status</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>${bookings.map(row).join('')}</tbody>
+                </table>
+            </div>`;
+
+        listEl.querySelectorAll('[data-confirm]').forEach(btn =>
+            btn.addEventListener('click', () =>
+                act(btn, '/api/bookings/' + btn.dataset.confirm + '/confirm', 'Booking confirmed.')));
+        listEl.querySelectorAll('[data-decline]').forEach(btn =>
+            btn.addEventListener('click', () =>
+                act(btn, '/api/bookings/' + btn.dataset.decline + '/decline', 'Booking declined.',
+                    'Decline this booking? The date will become free for others.')));
+        listEl.querySelectorAll('[data-cancel]').forEach(btn =>
+            btn.addEventListener('click', () =>
+                act(btn, '/api/bookings/' + btn.dataset.cancel + '/cancel', 'Booking cancelled.',
+                    'Cancel this booking? The date will become free for others.')));
+    }
+
+    function row(b) {
+        const active = b.status === 'requested' || b.status === 'confirmed';
+        let actions = '';
+        if (isStudio) {
+            if (b.status === 'requested') {
+                actions = '<button type="button" data-confirm="' + b.id + '">Confirm</button> ' +
+                    '<button type="button" data-decline="' + b.id + '">Decline</button>';
+            }
+        } else if (active) {
+            // This is only a hint for the user. The server checks the 3-day rule again.
+            actions = daysUntil(b.date) >= 3
+                ? '<button type="button" data-cancel="' + b.id + '">Cancel</button>'
+                : '<span class="muted">Cannot cancel within 3 days</span>';
+        }
+        return `
+            <tr>
+                <td>${esc(formatDate(b.date))}</td>
+                ${isStudio ? '<td>' + esc(b.customerName) + '<br><span class="muted">' + esc(b.customerEmail) + '</span></td>' : ''}
+                <td>${b.wallSize} sq ft</td>
+                <td>${esc(b.address)}</td>
+                <td>${formatPrice(b.price)}</td>
+                <td><span class="badge ${esc(b.status)}">${esc(b.status)}</span></td>
+                <td>${actions}</td>
+            </tr>`;
+    }
+
+    // One helper for every button in the table: confirm, call the API, show the result, refresh.
+    async function act(btn, path, successMessage, confirmText) {
+        if (confirmText && !confirm(confirmText)) {
+            return;
+        }
+        btn.disabled = true;
+        try {
+            await api('POST', path);
+            showBanner(successMessage, 'success');
+        } catch (err) {
+            showBanner(err.message);
+        }
+        reload();
+    }
+
+    function updatePreview() {
+        const size = Number(form.wallSize.value);
+        previewEl.textContent = size >= 10 && size <= 500
+            ? 'Estimated price: ' + formatPrice(size * MURAL_RATE_PREVIEW)
+            : 'Enter a wall size to see the estimated price.';
+    }
+
+    if (form) {
+        updatePreview();
+        form.wallSize.addEventListener('input', updatePreview);
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const values = Object.fromEntries(new FormData(form));
+            const button = form.querySelector('button[type="submit"]');
+            button.disabled = true;
+            try {
+                await api('POST', '/api/bookings', {
+                    date: values.date,
+                    wallSize: Number(values.wallSize),
+                    address: values.address
+                });
+                showBanner('Booking requested! The studio will confirm or decline it.', 'success');
+                form.reset();
+                updatePreview();
+            } catch (err) {
+                showBanner(err.message);   // for example: "Sorry, this date was just taken"
+            } finally {
+                button.disabled = false;
+            }
+            reload();
+        });
     }
 
     reload();

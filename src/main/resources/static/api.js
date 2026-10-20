@@ -121,3 +121,30 @@ async function loadInto(container, fetcher, render, emptyText) {
             () => loadInto(container, fetcher, render, emptyText));
     }
 }
+// ---------- Date helpers (for the booking screens) ----------
+// "2026-11-05" -> a Date for that day in the browser's own time zone.
+function parseLocalDate(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+}
+
+// Today plus n days, as "YYYY-MM-DD" (the format the date input and the server use).
+function dateInDays(n) {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + mm + '-' + dd;
+}
+
+function formatDate(iso) {
+    return parseLocalDate(iso).toLocaleDateString('en-IN',
+        { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// How many days from today until the given date.
+function daysUntil(iso) {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((parseLocalDate(iso) - today) / 86400000);
+}
