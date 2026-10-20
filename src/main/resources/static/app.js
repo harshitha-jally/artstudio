@@ -4,17 +4,17 @@ const userBoxEl = document.getElementById('user-box');
 
 // Which tabs each role sees. We will add more tabs here later.
 const NAV = {
-    customer: [['paintings', 'Paintings'], ['orders', 'My orders'], ['bookings', 'Wall bookings']],
-    studio: [['paintings', 'Paintings'], ['orders', 'All orders'], ['bookings', 'Wall bookings']]
+    customer: [['paintings', 'Paintings'], ['orders', 'My orders'], ['bookings', 'Wall bookings'], ['pottery', 'Pottery']],
+    studio: [['paintings', 'Paintings'], ['orders', 'All orders'], ['bookings', 'Wall bookings'], ['pottery', 'Pottery']]
 };
-
 // Which function draws which page. We will add more pages here later.
 const views = {
     login: renderLogin,
     signup: renderSignup,
     paintings: renderPaintings,
     orders: renderOrders,
-    bookings: renderBookings
+    bookings: renderBookings,
+    pottery: renderPottery
 };
 
 // ---------- Routing: decide what to show based on the #/... part of the URL ----------
@@ -452,6 +452,180 @@ function renderBookings(root) {
         });
     }
 
+    reload();
+}
+
+// ---------- Custom pottery ----------
+function renderPottery(root) {
+    const isStudio = getSession().user.role === 'studio';
+    let options = null;          // items and glazes from the server
+    let currentRequests = [];    // the requests currently on screen
+
+    root.innerHTML = `
+        <div class="page-head"><h2>${isStudio ? 'Pottery requests' : 'Custom pottery'}</h2></div>
+        ${isStudio ? '' : '<div id="pottery-form-slot"></div>'}
+        <div id="pottery-list"></div>`;
+
+    const listEl = root.querySelector('#pottery-list');
+    const formSlot = root.querySelector('#pottery-form-slot');   // does not exist for the studio
+
+    // ----- The list of requests -----
+    function reload() {
+        const emptyText = isStudio
+            ? 'No pottery requests yet.'
+            : 'You have no pottery requests yet. Use the form above to send one.';
+        return loadInto(listEl, () => api('GET', '/api/pottery'), showTable, emptyText);
+    }
+
+    function showTable(requests) {
+        currentRequests = requests;
+        listEl.innerHTML = `
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th><th>Item</th><th>Glaze</th><th>Quantity</th><th>Needed by</th>
+                            ${isStudio ? '<th>Customer</th>' : ''}
+                            <th>Status</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>${requests.map(row).join('')}</tbody>
+                </table>
+            </div>`;
+
+        listEl.querySelectorAll('[data-edit]').forEach(btn =>
+            btn.addEventListener('click', () => {
+                const request = currentRequests.find(r => String(r.id) === btn.dataset.edit);
+                if (request) {
+                    drawForm(request);
+                    formSlot.scrollIntoView({ behavior: 'smooth' });
+                }
+            }));
+        listEl.querySelectorAll('[data-cancel]').forEach(btn =>
+            btn.addEventListener('click', () =>
+                act(btn, '/api/pottery/' + btn.dataset.cancel + '/cancel', 'Request cancelled.',
+                    'Cancel this pottery request?')));
+        listEl.querySelectorAll('[data-accept]').forEach(btn =>
+            btn.addEventListener('click', () =>
+                act(btn, '/api/pottery/' + btn.dataset.accept + '/accept', 'Request accepted.')));
+        listEl.querySelectorAll('[data-decline]').forEach(btn =>
+            btn.addEventListener('click', () =>
+                act(btn, '/api/pottery/' + btn.dataset.decline + '/decline', 'Request declined.',
+                    'Decline this pottery request?')));
+    }
+
+    function row(r) {
+        let actions = '';
+        if (r.status === 'requested') {
+            actions = isStudio
+                ? '<button type="button" data-accept="' + r.id + '">Accept</button> ' +
+                '<button type="button" data-decline="' + r.id + '">Decline</button>'
+                : '<button type="button" data-edit="' + r.id + '">Edit</button> ' +
+                '<button type="button" data-cancel="' + r.id + '">Cancel</button>';
+        }
+        return `
+            <tr>
+                <td>${r.id}</td>
+                <td>${esc(r.itemName)}</td>
+                <td>${esc(r.glazeName)}</td>
+                <td>${r.quantity}</td>
+                <td>${esc(formatDate(r.neededBy))}</td>
+                ${isStudio ? '<td>' + esc(r.customerName) + '<br><span class="muted">' + esc(r.customerEmail) + '</span></td>' : ''}
+                <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+                <td>${actions}</td>
+            </tr>`;
+    }
+
+    // One helper for the buttons in the table: confirm, call the API, show the result, refresh.
+    async function act(btn, path, successMessage, confirmText) {
+        if (confirmText && !confirm(confirmText)) {
+            return;
+        }
+        btn.disabled = true;
+        try {
+            await api('POST', path);
+            showBanner(successMessage, 'success');
+        } catch (err) {
+            showBanner(err.message);   // for example: "...can no longer be cancelled..."
+        }
+        reload();
+    }
+
+    // ----- The form (customers only). editing = null for a new request, or the request being edited -----
+    function drawForm(editing) {
+        const optionTags = (list, selectedId) => list.map(o =>
+            '<option value="' + esc(o.id) + '"' + (o.id === selectedId ? ' selected' : '') + '>' +
+            esc(o.name) + '</option>').join('');
+
+        formSlot.innerHTML = `
+            <section class="card booking-form">
+                <h3>${editing ? 'Edit request #' + editing.id : 'Request custom pottery'}</h3>
+                <form id="pottery-form">
+                    <label>Item
+                        <select name="itemId" required>
+                            <option value="">Choose an item</option>
+                            ${optionTags(options.items, editing ? editing.itemId : null)}
+                        </select></label>
+                    <label>Glaze
+                        <select name="glazeId" required>
+                            <option value="">Choose a glaze</option>
+                            ${optionTags(options.glazes, editing ? editing.glazeId : null)}
+                        </select></label>
+                    <label>Quantity (1 to 12)
+                        <input type="number" name="quantity" required min="1" max="12" step="1"
+                               value="${editing ? editing.quantity : ''}"></label>
+                    <label>Needed by (at least 14 days from today)
+                        <input type="date" name="neededBy" required min="${dateInDays(14)}"
+                               value="${editing ? esc(editing.neededBy) : ''}"></label>
+                    <button type="submit">${editing ? 'Save changes' : 'Send request'}</button>
+                    ${editing ? '<button type="button" id="cancel-edit">Cancel edit</button>' : ''}
+                </form>
+            </section>`;
+
+        const form = formSlot.querySelector('#pottery-form');
+
+        if (editing) {
+            formSlot.querySelector('#cancel-edit').addEventListener('click', () => drawForm(null));
+        }
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const values = Object.fromEntries(new FormData(form));
+            const body = {
+                itemId: values.itemId,
+                glazeId: values.glazeId,
+                quantity: Number(values.quantity),
+                neededBy: values.neededBy
+            };
+            const button = form.querySelector('button[type="submit"]');
+            button.disabled = true;
+            try {
+                if (editing) {
+                    await api('PUT', '/api/pottery/' + editing.id, body);
+                    showBanner('Request updated.', 'success');
+                } else {
+                    await api('POST', '/api/pottery', body);
+                    showBanner('Request sent! The studio will accept or decline it.', 'success');
+                }
+                drawForm(null);   // back to an empty "new request" form
+            } catch (err) {
+                showBanner(err.message);
+                button.disabled = false;
+            }
+            reload();
+        });
+    }
+
+    // ----- Start: load the dropdown options (customers only), then the list -----
+    if (formSlot) {
+        loadInto(formSlot,
+            () => api('GET', '/api/pottery/options'),
+            (data) => {
+                options = data;
+                drawForm(null);
+            },
+            '');
+    }
     reload();
 }
 
